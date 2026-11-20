@@ -18,7 +18,7 @@ const workspace = (org, id) => buildProjectEngagementWorkspace(Object.fromEntrie
     'artifactVersions', 'artifactApprovals', 'engagementActivity'].map(key => [key, []]),
 ]))
 
-test('mounted project defaults to Work, preserves explicit tabs and rejects late cross-scope reads', async t => {
+test('manual project defaults to Overview, preserves explicit tabs and execution Work, and rejects late cross-scope reads', async t => {
   const env = mountedEnvironment()
   const previous = { document: globalThis.document, window: globalThis.window, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT }
   Object.assign(globalThis, { document: env.document, window: env.window, IS_REACT_ACT_ENVIRONMENT: true })
@@ -41,6 +41,7 @@ test('mounted project defaults to Work, preserves explicit tabs and rejects late
     if(name.includes('ProjectStagePlanPanel.jsx'))return {__esModule:true,default:props=>{stageProps=props;return null}}
     if(name.includes('ContextConversationPanel.jsx'))return {__esModule:true,default:props=>{chatProps=props;return React.createElement('span',null,'ContextConversationPanel.jsx::'+props.projectId+':'+props.contextKind)}}
     if (name === '../components/SearchConsole.jsx') return { SearchConsoleSettings: () => null }
+    if (name === '../components/WebsiteTracking.jsx') return { WebsiteTrackingSettings: () => null }
     if (name.startsWith('../components/') || name.startsWith('./')) return { __esModule: true,
       default: props => React.createElement('span', null, `${name}:${props.organizationId || ''}:${props.projectId || ''}:${props.contextKind || ''}`) }
     return nativeRequire(name)
@@ -51,13 +52,13 @@ test('mounted project defaults to Work, preserves explicit tabs and rejects late
   const render = () => act(async () => { root.render(React.createElement(Component)); await new Promise(resolve => setTimeout(resolve, 0)) })
   const selected = () => propsOf(nodes(env.container).find(node => propsOf(node)?.role === 'tabpanel'))?.['aria-labelledby']
   await render()
-  assert.equal(selected(), 'project-tab-work')
-  assert.deepEqual(nodes(env.container).filter(node=>propsOf(node)?.role==='tab').map(node=>node.textContent),['Work','Assets','Settings'])
-  assert.match(env.container.textContent, /SharedProjectWork.jsx/)
+  assert.equal(selected(), 'project-tab-dashboard')
+  assert.deepEqual(nodes(env.container).filter(node=>propsOf(node)?.role==='tab').map(node=>node.textContent),['Overview','Work','Website','Assets','Settings'])
+  assert.match(env.container.textContent, /ProjectOverview.jsx/)
   assert.doesNotMatch(env.container.textContent, /ContextConversationPanel.jsx/)
   for (const [tab, primary] of [['overview', 'overview'], ['discussion', 'discussion'], ['work', 'work'],
     ['project-tasks', 'work'], ['engagement-work', 'work'], ['planning', 'work'], ['retainer-planning', 'work'],
-    ['website-work','work'],['marketing-work','work'],['resources','overview'],['services', 'overview'], ['journey', 'overview'], ['outputs', 'outputs'], ['reviews', 'work'], ['activity', 'overview'],
+    ['website-work','website-work'],['marketing-work','work'],['resources','overview'],['services', 'overview'], ['journey', 'overview'], ['outputs', 'outputs'], ['reviews', 'work'], ['activity', 'overview'],
     ['unknown', 'overview'], ['', 'overview']]) {
     params = new URLSearchParams({ tab }); await render()
     assert.equal(selected(), `project-tab-${primary}`, tab)

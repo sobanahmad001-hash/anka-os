@@ -150,6 +150,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/reporting-worker/index.ts"
 
+[functions.website-tracking]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/website-tracking/index.ts"
+
 [functions.website-native-design]
 enabled = true
 verify_jwt = true

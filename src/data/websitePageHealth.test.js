@@ -29,3 +29,17 @@ test('stale version evidence cannot certify indexing and completed Work is not v
  assert.equal(workAspect({service:'seo_operations'}),null)
  assert.equal(workAspect({service:'setup_marketing_technical_seo_audit'}),'technical')
 })
+
+test('detected content changes invalidate older manual indexing evidence without completing Work',()=>{
+ const row={observation:{state:'observed',changedAt:'2026-11-18T10:00:00Z'},manual:{check:{checked_at:'2026-11-17',evidence:{indexed:true}}}}
+ const result=summarizePageHealth(row,now)
+ assert.equal(result.aspects[2].checks.find(c=>c.label==='Indexing').state,'unknown')
+ assert.equal(result.aspects[2].stale,true)
+})
+
+test('redirect and robots evidence from another URL cannot certify this page',()=>{
+ const row={url:'https://example.com/new',source:{url:'https://example.com/old',meta:{url:'https://example.com/old',redirects:[],robots:[]}}}
+ const checks=summarizePageHealth(row,now).aspects[2].checks
+ assert.equal(checks.find(c=>c.label==='Redirect chain').state,'unknown')
+ assert.equal(checks.find(c=>c.label==='Noindex directives').state,'unknown')
+})

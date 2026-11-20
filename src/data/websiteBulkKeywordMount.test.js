@@ -18,6 +18,7 @@ test('table startup and visible selection exclude existing and dismissed targets
  const module={exports:{}}
  const require=name=>{
   if(name==='react')return React
+  if(name.includes('WebsiteUrlGroups'))return {__esModule:true,default:()=>null}
   if(name.includes('WebsitePageHealth'))return {usePageHealth:()=>({rows:[]}),HealthSummary:()=>null}
   if(name.includes('AuthContext'))return {useAuth:()=>({user:{id:'actor'}})}
   if(name.includes('supabase'))return {supabase:{rpc:async name=>{
@@ -37,7 +38,9 @@ test('table startup and visible selection exclude existing and dismissed targets
   await act(settle)
   assert.equal(keywordReads,0)
   const find=text=>nodes(env.container).find(node=>node.textContent===text&&typeof props(node).onClick==='function')
-  assert.equal(props(find('Pages'))['aria-pressed'],true)
+  assert.equal(props(find('URL groups'))['aria-pressed'],true)
+  await act(async()=>{props(find('All pages')).onClick();await settle()})
+  await act(settle)
   await act(async()=>{props(find('Keywords for Home')).onClick();await settle()})
   await act(settle)
   const selectAll=nodes(env.container).find(node=>props(node).type==='checkbox'&&!props(node)['aria-label'])

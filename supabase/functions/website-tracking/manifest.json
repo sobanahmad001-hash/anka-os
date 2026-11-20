@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "registryMigration": "supabase/migrations/20261119133820_website_tracking_adapter_registry.sql",
+  "implementationFiles": {
+    "supabase/functions/_shared/dailyGscAdapter.js": "9058fc125cae7400e3d124319c89573754520e2995960353ac46fcdca60db6f2",
+    "supabase/functions/_shared/dailyGscCredentials.ts": "37c08df784ed659e8d1932db35ce5ec2aa2b1f1db77a9f61087274d96cb6ddce",
+    "supabase/functions/_shared/reportingGoogleAdapters.js": "f37098db7e16ce5d5750d48a6a8de2fe1c27831eb4311eb6916c1a9c9ff2f92e",
+    "supabase/functions/_shared/reportingRefreshWorker.js": "2ccaf3ca7603427c4939f7ed8fe13b1459f5ecdc91d2d5e8e0126679ea712e79",
+    "supabase/functions/_shared/reportingVerificationWorker.js": "634e6bb226f4fc4cb8cc7e1ef812403d60441810f291395cfbd919b881d2b72e",
+    "supabase/functions/_shared/reportingIngestion.js": "cd61b050a17678f18d47955dadfe9c476ac572211a1efda89c7c7ebe9d1f4a51",
+    "supabase/functions/_shared/reportingRefreshPolicy.js": "15321e6252bd3359065f036be01a344c66dc2c917a647827a792850e92da6f7f",
+    "supabase/functions/_shared/googleOAuthTokens.ts": "8ecb9d551ed2c52ee9e237ec5523ed2afd8e048856daa965a88092de2786f8b9",
+    "supabase/functions/_shared/websiteTrackingBatch.js": "45346ce4826e2c610b0c1e40a322f1ab7b22a3a080731c963fd05ac5fd6dd36e",
+    "supabase/functions/_shared/observeTrackedPage.ts": "55e29d7d2919ebd84d193b9bc2499319b85e0dc4a390d04ede13d78728d207a0",
+    "supabase/functions/_shared/websiteObservedChanges.js": "cb9e76d161260ea8cb99c3b7795b7d7c881d425a081f083c8372dd787520f030",
+    "supabase/functions/_shared/websiteStagingContracts.js": "90d93fdd646b229aa33bb4b30037978c32e35601cffdc97cdb0db4af502df454",
+    "supabase/functions/website-tracking/index.ts": "6be2d33ca4b3720ada5b7ebacb2c8652a884b3409855622d5f0a60bf8fc96b90",
+    "supabase/functions/website-discovery/discover.js": "690d415928e0971f63a6032544290368441dec3bff0b3336d429924f92a720b5",
+    "supabase/functions/website-discovery/publicSite.ts": "c963bf3f577d6ec3c8e0a4eda5bd51b732e91ce79970445b028504253f9ad65a"
+  },
+  "adapter": {
+    "sourceContract": "anka.gsc.page-and-query.daily.final.v1",
+    "provider": "google_search_console",
+    "resourceKind": "gsc_site",
+    "metricDefinitions": [
+      {
+        "metric_key": "clicks",
+        "metric_label": "GSC clicks",
+        "unit": "count",
+        "aggregation": "additive"
+      },
+      {
+        "metric_key": "impressions",
+        "metric_label": "GSC impressions",
+        "unit": "count",
+        "aggregation": "additive"
+      },
+      {
+        "metric_key": "ctr",
+        "metric_label": "GSC ctr",
+        "unit": "ratio",
+        "aggregation": "non_additive"
+      },
+      {
+        "metric_key": "position",
+        "metric_label": "GSC position",
+        "unit": "position",
+        "aggregation": "non_additive"
+      }
+    ],
+    "manifestSha256": "210d59f9f8918942583470f2665170ba891ebe4c07c7c4ab6001dc9edc7b6064"
+  }
+}

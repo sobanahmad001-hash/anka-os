@@ -15,7 +15,7 @@ async function pages(query, key = 'id') {
   }
 }
 
-export async function readSharedWork(workspace, signal) {
+export async function readSharedWork(workspace, signal, {includePageAssets=true}={}) {
   const {project, engagement} = workspace
   const org = project.organization_id
   const scoped = (table, fields) => supabase.from(table).select(fields).eq('project_id',project.id).abortSignal(signal)
@@ -57,10 +57,10 @@ export async function readSharedWork(workspace, signal) {
     const key=kind+':'+item.id
     const overlay=kind==='engagement_work_item'?overlays.get(item.id):null
     return {key,title:item.title,group:overlay?.group||(websiteWork.has(key)?'Website':groups[item.department_id]||item.department_id||'Project'),
-      status:overlay?.status||item.status,day:overlay?.day||item.due_date,owner:owners.get(item.assignee_id||item.assigned_to),
+      status:overlay?.status||item.status,workStatus:item.status,dueDate:item.due_date,day:overlay?.day||item.due_date,owner:owners.get(item.assignee_id||item.assigned_to),
       href:overlay?.href||'/sphere/workspace/items/'+kind+'/'+item.id}
   }
   const pageRows=new Map(website.map(p=>[p.id,{key:'page:'+p.id,title:p.title,group:'Website',status:p.state||'Page',
     href:ownerPath({tab:'website-work',page:p.id})}]))
-  return [...work.map(w=>canonical(w,'engagement_work_item')),...tasks.map(t=>canonical(t,'project_task')),...pageRows.values()]
+  return [...work.map(w=>canonical(w,'engagement_work_item')),...tasks.map(t=>canonical(t,'project_task')),...(includePageAssets?[...pageRows.values()]:[])]
 }

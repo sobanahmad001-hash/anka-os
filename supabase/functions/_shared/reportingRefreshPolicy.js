@@ -13,7 +13,7 @@ export function reportingRefreshPolicy(value){
  closed(value,keys);for(const k of keys)integer(value[k],k)
  for(const k of ['cadence_seconds','stale_after_seconds','manual_min_interval_seconds','backoff_seconds','max_backoff_seconds','lease_seconds'])integer(value[k],k,31536000)
  integer(value.history_days,'history_days',366);integer(value.max_period_days,'max_period_days',value.history_days)
- integer(value.max_observations,'max_observations',1000)
+ integer(value.max_observations,'max_observations',400000)
  if(value.max_backoff_seconds<value.backoff_seconds)throw new TypeError('Backoff ceiling cannot be shorter than initial backoff')
  return Object.freeze({...value})
 }

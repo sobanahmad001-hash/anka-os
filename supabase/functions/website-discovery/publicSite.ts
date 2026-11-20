@@ -15,7 +15,7 @@ export function publicAddress(ip:string) {
     &&!(a===172&&b>=16&&b<=31)&&!(a===192&&(b===168||b===0||b===2||(b===88&&c===99)))
     &&!(a===198&&(b===18||b===19||(b===51&&c===100)))&&!(a===203&&b===0&&c===113)
 }
-export type Reply={status:number,text:string,type:string,location:string}
+export type Reply={status:number,text:string,type:string,location:string,robotsHeader?:string}
 export async function pinSite(host:string) {
   const addresses=await Deno.resolveDns(host,'A')
   if(!addresses.length||addresses.some(ip=>!publicAddress(ip)))throw Error('A public IPv4 HTTPS site is required.')
@@ -26,7 +26,7 @@ async function readResponse(socket:Deno.TlsConn):Promise<Reply> {
   parser.maxHeaderSize = 16384
   const chunks:Buffer[] = []
   let size = 0, wireSize = 0, complete = false
-  let status = 0, type = '', location = ''
+  let status = 0, type = '', location = '', robotsHeader = ''
   parser[HTTPParser.kOnHeadersComplete] = info => {
     if (status || info.upgrade || info.statusCode < 200) throw Error('Unexpected response')
     status = info.statusCode
@@ -34,6 +34,7 @@ async function readResponse(socket:Deno.TlsConn):Promise<Reply> {
       const name = info.headers[i].toLowerCase()
       if (name === 'location') location = info.headers[i + 1]
       if (name === 'content-type') type = info.headers[i + 1]
+      if (name === 'x-robots-tag') robotsHeader += (robotsHeader ? ', ' : '') + info.headers[i + 1]
     }
   }
   parser[HTTPParser.kOnBody] = (chunk, offset, length) => {
@@ -61,7 +62,7 @@ async function readResponse(socket:Deno.TlsConn):Promise<Reply> {
     const used = parser.execute(part)
     if (used !== length) throw Error('Invalid public response')
   }
-  return {status, type, location, text:Buffer.concat(chunks, size).toString('utf8')}
+  return {status, type, location, robotsHeader, text:Buffer.concat(chunks, size).toString('utf8')}
 }
 
 export async function readPinned(url:URL, ip:string, timeout:number):Promise<Reply> {

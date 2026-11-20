@@ -19,23 +19,27 @@ export function summarizePageHealth(row,now=Date.now()){
  const source=row.source,meta=source?.meta
  const sourceMatches=!!row.url&&!!meta&&source?.url===row.url&&meta.url===row.url
  for(const [key,label] of [['title','Title'],['description','Meta description'],['h1','H1']]){
-  add('onpage',label,sourceMatches&&Object.hasOwn(meta,key)?meta[key]?.trim()?'checked':'issue':'unknown',sourceMatches?'Stored discovery metadata; current observation time is unrecorded':'No matching page observation')
+  add('onpage',label,sourceMatches&&Object.hasOwn(meta,key)?meta[key]?.trim()?'checked':'issue':'unknown',sourceMatches?source.observedAt?'Page observed '+source.observedAt:'Stored discovery metadata; current observation time is unrecorded':'No matching page observation')
  }
  for(const label of ['Content and intent relevance','Internal-link quality','Image descriptions'])add('onpage',label,'unknown','Manual or provider evidence required')
  add('technical','HTTP response',sourceMatches&&Number.isInteger(meta.status)?meta.status===200?'checked':'issue':'unknown',sourceMatches&&meta.status?'Stored HTTP '+meta.status:'No matching HTTP observation')
  add('technical','Canonical URL',sourceMatches&&Object.hasOwn(meta,'canonical')?meta.canonical===row.url?'checked':'issue':'unknown',sourceMatches?meta.canonical||'Canonical not recorded':'No matching canonical observation')
- for(const label of ['Redirect chain','Noindex directives'])add('technical',label,'unknown','Not retained by the current discovery source')
+ add('technical','Redirect chain',sourceMatches&&Array.isArray(meta?.redirects)?meta.redirects.length?'issue':'checked':'unknown','Redirects require review against the intended URL')
+ const directives=sourceMatches&&Array.isArray(meta?.robots)?meta.robots.map(r=>r.value).join(',')+','+(meta.robotsHeader||''):null
+ add('technical','Noindex directives',directives===null?'unknown':/\b(noindex|none)\b/i.test(directives)?'issue':'checked','Observed HTML and HTTP directives; this does not certify Google indexing')
+ if(row.observation?.state&&row.observation.state!=='observed')add('technical','Current page availability','issue',row.observation.state)
  const manual=row.manual,check=manual?.check,e=check?.evidence
+ const changedAfterCheck=!!row.observation?.changedAt&&(!check?.checked_at||Date.parse(row.observation.changedAt)>Date.parse(check.checked_at))
  for(const [key,label] of [['indexed','Indexing'],['schema_valid','Schema'],['mobile_score','Mobile performance'],['desktop_score','Desktop performance']]){
-  const known=e?.[key]!==null&&e?.[key]!==undefined&&!manual.recheck_required
+  const known=e?.[key]!==null&&e?.[key]!==undefined&&!manual.recheck_required&&!changedAfterCheck
   add('technical',label,known?e[key]===false?'issue':'checked':'unknown',known?'Manual evidence: '+e[key]:'No current exact-version evidence')
  }
  for(const finding of e?.findings||[])add(finding.category==='content'?'onpage':'technical',finding.description,'issue',finding.evidence,finding.severity)
  for(const a of ['onpage','technical']){
   const manualRelevant=a==='technical'?!!e&&Object.entries(e).some(([key,value])=>['indexed','schema_valid','mobile_score','desktop_score'].includes(key)&&value!==null)||(e?.findings||[]).some(f=>f.category!=='content'):(e?.findings||[]).some(f=>f.category==='content')
-  groups[a].lastChecked=manualRelevant?check?.checked_at:null
+  groups[a].lastChecked=source?.observedAt||(manualRelevant?check?.checked_at:null)
   // Discovery currently retains scan-start time, not each response's observation time.
-  groups[a].stale=!!source||!!manual?.recheck_required||!!check&&old(check.checked_at,7,now)
+  groups[a].stale=!!source&&old(source.observedAt,2,now)||!!manual?.recheck_required||!!check&&old(check.checked_at,7,now)||!!row.observation?.changedAt&&(!check?.checked_at||Date.parse(row.observation.changedAt)>Date.parse(check.checked_at))
  }
  for(const work of row.work||[]){const a=workAspect(work);if(a)groups[a].work.push({...work,state:healthWorkStatus(work)})}
  return {aspects:aspects.map(a=>{
