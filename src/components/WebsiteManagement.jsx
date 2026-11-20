@@ -1,10 +1,11 @@
 import WebsitePageHealth from './WebsitePageHealth.jsx'
+import WebsiteTrackingPanel from './WebsiteTracking.jsx'
 import KeywordAssessment, {KeywordUrlReview} from './KeywordAssessment.jsx'
 import {SearchConsolePage} from './SearchConsole.jsx'
 import WorkCardAssets from './WorkCardAssets.jsx'
 import WebsiteInventoryBrowser, {PageWork} from './WebsiteInventoryBrowser.jsx'
 import WebsiteImport, {WebsiteImportSource} from './WebsiteImport.jsx'
-import {useEffect,useState} from 'react'
+import {useEffect,useState,useRef} from 'react'
 import {supabase} from '../lib/supabase.js'
 import {comparisonPeriod,pageRankingReport} from '../data/websitePageRankings.js'
 
@@ -43,12 +44,31 @@ function Editor({page,onSave,onClose,busy}){
 export default function WebsiteManagement({project,workspace,initialId}){
   const [page,setPage]=useState(null),[edit,setEdit]=useState(null),[selected,setSelected]=useState(initialId||null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[refresh,reload]=useState(0)
   const [importing,setImporting]=useState(false)
+  const detailRef=useRef(null)
+  useEffect(()=>{
+    if(!page||edit)return
+    const previous=document.activeElement, previousOverflow=document.body.style.overflow
+    document.body.style.overflow='hidden'
+    const panel=detailRef.current
+    panel?.querySelector('button')?.focus()
+    const onKey=e=>{
+      if(e.key==='Escape'){e.preventDefault();setSelected(null)}
+      if(e.key==='Tab'){
+        const items=[...panel.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]')].filter(n=>n.getClientRects().length)
+        if(!items.length){e.preventDefault();return}
+        if(e.shiftKey&&document.activeElement===items[0]){e.preventDefault();items.at(-1).focus()}
+        else if(!e.shiftKey&&document.activeElement===items.at(-1)){e.preventDefault();items[0].focus()}
+      }
+    }
+    panel?.addEventListener('keydown',onKey)
+    return()=>{panel?.removeEventListener('keydown',onKey);document.body.style.overflow=previousOverflow;if(previous?.isConnected)previous.focus()}
+  },[page,edit])
   const org=project.organization_id,id=project.id
   useEffect(()=>{
-    let active=true;setPage(null);if(!selected)return
+    let active=true;setPage(null);setError('');if(!selected)return
     supabase.rpc('website_page_index',{p_org:org,p_project:id,p_page:selected}).then(({data,error:e})=>{
       if(active){if(e)setError(e.message);else setPage(data.items[0]||null)}
-    });return()=>{active=false}
+    }).catch(e=>{if(active)setError(e.message)});return()=>{active=false}
   },[id,org,selected,refresh])
   async function save(v){
     if(busy)return
@@ -60,7 +80,7 @@ export default function WebsiteManagement({project,workspace,initialId}){
 
   return <section aria-label="Website management" className="workspace-card p-4 space-y-4"><h2>Website page inventory</h2>{error&&<p role="alert">{error}</p>}
   {importing?<WebsiteImport project={project} onClose={()=>setImporting(false)} onApplied={()=>reload(r=>r+1)}/>:edit?<Editor key={edit.id} page={edit} onSave={save} onClose={()=>setEdit(null)} busy={busy}/>:<><button className={button} onClick={()=>setImporting(true)}>Import existing website</button> <button className={button} onClick={()=>setEdit({id:crypto.randomUUID(),sourceId:null,title:'',path:'',url:'',state:'new',brief:'',mode:'undecided',targets:[],sourceTargets:[],revision:0})}>Add page</button><KeywordUrlReview project={project}/><WebsiteInventoryBrowser workspace={workspace} refresh={refresh} onOpen={setSelected}/>
-{page&&<section className="space-y-3"><h3>{page.title}</h3><WebsitePageHealth key={project.id+page.id} project={project} page={page} workspace={workspace} refresh={refresh}/><WorkCardAssets project={project} cardKey={'page:'+page.id}/><WebsiteImportSource key={page.id} project={project} pageId={page.id}/><p>{page.url||page.path}</p><h4>Page brief</h4><p className="whitespace-pre-wrap">{page.brief||'No manual brief recorded.'}</p><button className={button} onClick={()=>setEdit(page)}>Edit page and targets</button><h4>Page keyword assignments</h4><Assignments pages={[page]}/><PageWork page={page} workspace={workspace} onChange={()=>reload(r=>r+1)}/><KeywordAssessment key={page.id+'-assessment'} page={page} project={project} onChanged={()=>reload(r=>r+1)}/><SearchConsolePage key={page.id} page={page} project={project}/><Rankings key={page.id+':'+page.revision} page={page} project={project}/></section>}
+{page&&<><div className="fixed inset-0 z-40 bg-black/40" aria-hidden="true" onClick={()=>setSelected(null)}/><section ref={detailRef} role="dialog" aria-modal="true" aria-label="Website page details" className="fixed inset-y-0 right-0 z-40 w-full max-w-3xl overflow-y-auto border-l border-[var(--anka-line)] bg-[var(--anka-surface)] p-5 shadow-xl"><div className="sticky top-0 flex items-center justify-between bg-[var(--anka-surface)] py-3"><h3>{page.title}</h3><button className={button} onClick={()=>setSelected(null)}>Close page details</button></div><WebsitePageHealth key={project.id+page.id} project={project} page={page} workspace={workspace} refresh={refresh}/><WebsiteTrackingPanel project={project} page={page}/><WorkCardAssets project={project} cardKey={'page:'+page.id}/><WebsiteImportSource key={page.id} project={project} pageId={page.id}/><p>{page.url||page.path}</p><h4>Page brief</h4><p className="whitespace-pre-wrap">{page.brief||'No manual brief recorded.'}</p><button className={button} onClick={()=>setEdit(page)}>Edit page and targets</button><h4>Page keyword assignments</h4><Assignments pages={[page]}/><PageWork page={page} workspace={workspace} onChange={()=>reload(r=>r+1)}/><KeywordAssessment key={page.id+'-assessment'} page={page} project={project} onChanged={()=>reload(r=>r+1)}/><SearchConsolePage key={page.id} page={page} project={project}/><Rankings key={page.id+':'+page.revision} page={page} project={project}/></section></>}
   </>}</section>
 }
 function Assignments({pages}){

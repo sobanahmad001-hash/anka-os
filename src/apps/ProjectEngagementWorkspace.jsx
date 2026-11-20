@@ -1,5 +1,7 @@
+import ProjectOverview from '../components/ProjectOverview.jsx'
 import {SearchConsoleSettings} from '../components/SearchConsole.jsx'
 import ProjectFigma from '../components/ProjectFigma.jsx'
+import {WebsiteTrackingSettings} from '../components/WebsiteTracking.jsx'
 import ProjectDrive from '../components/ProjectDrive.jsx'
 import WorkCardAssets from '../components/WorkCardAssets.jsx'
 import {useExecutionNavigation} from '../config/executionNavigation.js'
@@ -69,10 +71,10 @@ export default function ProjectEngagementWorkspace() {
   const [stageSelection,setStageSelection]=useState(null),[exactOutput,setExactOutput]=useState(null)
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const requestedTab = searchParams.get('tab') ?? 'work'
   const [execution,toggleExecution]=useExecutionNavigation(user?.id)
+  const requestedTab = searchParams.get('tab') ?? (execution ? 'work' : 'dashboard')
   const focus=Object.fromEntries(searchParams)
-  const tab = [...TABS, ...MORE_TABS, ...WORK_TABS, ...SERVICES_TABS, ['retainer-planning'], ['resources']].some(([id]) => id === requestedTab) ? requestedTab : 'overview'
+  const tab = [...TABS, ...MORE_TABS, ...WORK_TABS, ...SERVICES_TABS, ['retainer-planning'], ['resources'], ['dashboard']].some(([id]) => id === requestedTab) ? requestedTab : 'overview'
   useEffect(()=>{if(tab!=='discussion')setProductEntry(null)},[tab])
   const focusedRecord = parseWorkshopNavigation(searchParams).workRecord
   const allowLeavingCurrentView=()=>{if(navCurrent.current.owner!==navigationOwner)return false;if(navCurrent.current.busy)return false;return !navCurrent.current.dirty||Boolean(globalThis.confirm?.('Leave the current chat draft? Keep working to finish it first.'))}
@@ -198,9 +200,9 @@ export default function ProjectEngagementWorkspace() {
   const architecture = tab === 'discussion' && !error && !loading ? architectureReviewLink(workspace) : null
   const showRetainerPlanning = identity.hasEngagement
     && (project.engagement_type === 'retainer' || workspace.engagement?.engagement_type === 'retainer')
-  const tabs = execution ? TABS : [['work','Work'],['outputs','Assets'],['overview','Settings']]
+  const tabs = execution ? TABS : [['dashboard','Overview'],['work','Work'],['website-work','Website'],['outputs','Assets'],['overview','Settings']]
   const Navigation = tab === 'discussion' ? 'div' : Fragment
-  const selectedPrimaryTab = primaryTab(tab)
+  const selectedPrimaryTab = !execution && tab==='website-work' ? 'website-work' : primaryTab(tab)
   const subTabs = tab === 'services' || tab === 'journey' ? SERVICES_TABS : selectedPrimaryTab === 'work' ? [...WORK_TABS.filter(([id])=>id!=='marketing-work'||deliveryServices(workspace).length>0||organicServices(workspace).length>0||seoServices(workspace).length>0||(workspace.pipelineGroups||[]).some(group=>group.kind==='marketing')), ...(showRetainerPlanning ? [['retainer-planning', 'Recurring Planning']] : [])] : selectedPrimaryTab === 'services' ? SERVICES_TABS : []
   const isNavigationBusy=navigationBusy.owner===navigationOwner&&navigationBusy.value
   const onTabKeyDown = (event, index) => {
@@ -261,12 +263,14 @@ export default function ProjectEngagementWorkspace() {
           {tab==='marketing-work' && <ManualSeoWork focus={focus.source==='seo'?focus:undefined} key={navigationOwner+'-seo'} workspace={workspace}/>}
           {tab==='marketing-work' && <OrganicSocialWork focus={focus.source==='social'?focus:undefined} key={navigationOwner+'-social'} workspace={workspace}/>}
           {(execution||tab==='resources')&&['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
-          {['website-work','marketing-work'].includes(tab) && <BrandingLibrary key={navigationOwner} workspace={workspace}/>}
+          {execution && ['website-work','marketing-work'].includes(tab) && <BrandingLibrary key={navigationOwner} workspace={workspace}/>}
           {tab === 'branding-work' && <BrandDeliverableCards key={navigationOwner} workspace={workspace} initialId={focus.deliverable} actorId={user?.id} onRefresh={load}/>}
           {tab==='overview'&&<SearchConsoleSettings key={navigationOwner+'-gsc'} workspace={workspace} membership={activeMembership} signal={requestSignal} onNavigationBusyChange={reportNavigationBusy}/>}
           {tab==='overview'&&<ProjectFigma key={navigationOwner+'-figma'} project={workspace.project}/>}
+          {tab==='overview'&&<WebsiteTrackingSettings project={workspace.project}/>}
           {tab==='overview'&&<ProjectDrive key={navigationOwner} project={workspace.project}/>}
           {tab==='overview'&&<label><input type="checkbox" checked={execution} onChange={e=>toggleExecution(e.target.checked)}/> Show Chat and execution tools on this browser</label>}
+          {tab==='dashboard'&&<ProjectOverview workspace={workspace} onNavigate={selectTab}/>}
           {tab==='work'&&!execution&&<SharedProjectWork key={navigationOwner} workspace={workspace} onOpenService={selectTab} searchParams={searchParams} setSearchParams={setSearchParams}/>}
           {tab === 'work' && execution && <><ProjectStagePlanPanel key={navigationOwner} scope={{organizationId:activeOrganizationId,projectId,engagementId:workspace.engagement?.id}} actorId={user?.id} signal={requestSignal} onStateChange={reportStageState} onAccessError={handleOrganizationAccessError} onOpenBrief={openBrief} onContinueProductStructure={continueProductStructure} onContinueFoundationPositioning={continueFoundation} onContinue={continueStage} onManualSetup={()=>selectTab('services')} onOpenOutput={openStageOutput}/><details className="mt-5"><summary>All project work</summary><fieldset disabled={isNavigationBusy}><WorkViews onOpenPlan={()=>selectTab('services')} onChanged={load} onBusy={reportNavigationBusy} signal={requestSignal} workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams}/></fieldset></details></>}
           {tab === 'discussion' && <div className="studio-chat-layout">

@@ -8,15 +8,17 @@ export default function SharedProjectWork({workspace,searchParams,setSearchParam
  useEffect(()=>{
    const controller=new AbortController()
    setRows(null);setError('')
-   readSharedWork(workspace,controller.signal).then(items=>{if(!controller.signal.aborted)setRows(items)})
+   readSharedWork(workspace,controller.signal,{includePageAssets:false}).then(items=>{if(!controller.signal.aborted)setRows(items)})
      .catch(e=>{if(!controller.signal.aborted)setError(e.message)})
    return ()=>controller.abort()
  },[workspace])
  const view=searchParams.get('workView')||'board',group=searchParams.get('serviceGroup')||''
  const month=searchParams.get('workMonth')||new Date().toISOString().slice(0,7)
- function change(key,value){const next=new URLSearchParams(searchParams);next.set(key,value);setSearchParams(next,{replace:true})}
- const cards=(rows||[]).filter(c=>!group||c.group===group)
- const entry=c=><li className="workspace-card min-w-0 p-3 [overflow-wrap:anywhere]" key={c.key}><Link className="font-semibold underline" to={c.href}>{c.title}</Link><p>{c.group} · {c.status} · {c.owner||'Unassigned'} · {c.day||'No date'}</p><WorkCardAssets project={workspace.project} cardKey={c.key}/></li>
+ function change(key,value){const next=new URLSearchParams(searchParams);next.set(key,value);if(key!=='workOffset')next.delete('workOffset');setSearchParams(next,{replace:true})}
+ const matching=(rows||[]).filter(c=>(!group||c.group===group)&&(view!=='calendar'||c.day?.startsWith(month+'-')))
+ const offset=Math.max(0,Number(searchParams.get('workOffset'))||0)
+ const cards=matching.slice(offset,offset+30)
+ const entry=c=><li className="workspace-card min-w-0 p-3 [overflow-wrap:anywhere]" key={c.key}><Link className="font-semibold underline" to={c.href}>{c.title}</Link><p>{c.group} · {c.status} · {c.owner||'Unassigned'} · {c.day||'No date'}</p><details><summary>Assets and actions</summary><WorkCardAssets project={workspace.project} cardKey={c.key}/></details></li>
  const buckets=new Map()
  for(const c of cards){
    const key=view==='calendar'?c.day:c.status
@@ -30,5 +32,6 @@ export default function SharedProjectWork({workspace,searchParams,setSearchParam
  {view==='calendar'&&<label>Month <input type="month" value={month} onChange={e=>change('workMonth',e.target.value)}/></label>}
  {error?<p role="alert">{error}</p>:!rows?<p role="status">Loading Work…</p>:view==='list'?<ul className="space-y-2">{cards.map(entry)}</ul>:
  <div className={view==='calendar'?'space-y-3':'grid gap-3 md:grid-cols-3'}>{[...buckets].sort(([a],[b])=>String(a).localeCompare(String(b))).map(([key,items])=><section className="min-w-0" key={key}><h3>{key}</h3><ul>{items.map(entry)}</ul></section>)}</div>}
+ {rows&&!error&&<div className="flex flex-wrap gap-3"><p>{matching.length ? offset+1 : 0}–{Math.min(offset+30,matching.length)} of {matching.length} matching Work · {rows.length} project Work records</p><button className="workspace-button" disabled={!offset} onClick={()=>change('workOffset',String(Math.max(0,offset-30)))}>Previous Work</button><button className="workspace-button" disabled={offset+30>=matching.length} onClick={()=>change('workOffset',String(offset+30))}>Next Work</button></div>}
  {rows&&!error&&(view==='calendar'?!buckets.size:!cards.length)&&<p>No matching Work.</p>}</section>
 }

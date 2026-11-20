@@ -4,8 +4,8 @@ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]
 const HASH=/^[a-f0-9]{64}$/
 const metric=(metric_key,metric_label,unit,aggregation)=>Object.freeze({metric_key,metric_label,unit,aggregation})
 export const GOOGLE_REPORTING_CONTRACTS=Object.freeze([
- Object.freeze({sourceContract:'anka.ga4.page-day.bounded.v1',provider:'google_analytics',resourceKind:'ga4_property',metricDefinitions:Object.freeze([metric('screenPageViews','GA4 views','count','additive'),metric('sessions','GA4 sessions','count','non_additive'),metric('totalUsers','GA4 total users','count','non_additive')])}),
- Object.freeze({sourceContract:'anka.gsc.page-query-day.web.final.bounded.v1',provider:'google_search_console',resourceKind:'gsc_site',metricDefinitions:Object.freeze([metric('clicks','GSC clicks','count','additive'),metric('impressions','GSC impressions','count','additive'),metric('ctr','GSC click-through rate','ratio','non_additive'),metric('position','GSC average position','position','non_additive')])}),
+ Object.freeze({sourceContract:'anka.ga4.page-day.bounded.v2',provider:'google_analytics',resourceKind:'ga4_property',metricDefinitions:Object.freeze([metric('screenPageViews','GA4 views','count','additive'),metric('sessions','GA4 sessions','count','non_additive'),metric('totalUsers','GA4 total users','count','non_additive')])}),
+ Object.freeze({sourceContract:'anka.gsc.page-query-day.web.final.bounded.v2',provider:'google_search_console',resourceKind:'gsc_site',metricDefinitions:Object.freeze([metric('clicks','GSC clicks','count','additive'),metric('impressions','GSC impressions','count','additive'),metric('ctr','GSC click-through rate','ratio','non_additive'),metric('position','GSC average position','position','non_additive')])}),
 ])
 export async function reportingSha256(value){const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return [...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('')}
 function resource(context,contract){

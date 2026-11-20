@@ -1,3 +1,4 @@
+import WebsiteUrlGroups from './WebsiteUrlGroups.jsx'
 import {usePageHealth,HealthSummary} from './WebsitePageHealth.jsx'
 import BulkKeywordReview from './BulkKeywordReview.jsx'
 import {eligibleKeyword} from '../data/bulkKeywordReview.js'
@@ -15,24 +16,25 @@ function Pager({offset,total,onChange,label}){
 export default function WebsiteTables({workspace,refresh,onOpen}){
  const {project}=workspace
  const [tableRevision,updateTable]=useState(0)
- const [view,setView]=useState('pages'),[search,setSearch]=useState(''),[sort,setSort]=useState('title'),[attention,setAttention]=useState('all')
+ const [view,setView]=useState('groups'),[search,setSearch]=useState(''),[sort,setSort]=useState('title'),[attention,setAttention]=useState('all')
  const [filter,setFilter]=useState('all'),[owner,setOwner]=useState(''),[offset,setOffset]=useState(0),[expanded,setExpanded]=useState(null),[data,setData]=useState(null),[error,setError]=useState('')
  const health=usePageHealth(project,data?.items.map(p=>p.id)||[],String(refresh)+':'+tableRevision)
  const owners=[...new Map([...(workspace.engagementWorkItems||[]),...(workspace.projectTasks||[])].filter(w=>w.owner?.id).map(w=>[w.owner.id,w.owner.name])).entries()]
  const change=(fn,v)=>{setOffset(0);setExpanded(null);fn(v)}
  useEffect(()=>{
   let active=true;setData(null);setError('');setExpanded(null)
+  if(view==='groups')return
   const timer=setTimeout(()=>{
    supabase.rpc('website_pages_table',{p_org:project.organization_id,p_project:project.id,p_search:search.trim(),p_filter:filter,p_owner:owner||null,p_offset:offset,p_sort:sort,p_attention:attention})
     .then(({data,error})=>{if(active){setData(data);setError(error?.message||'')}}).catch(e=>{if(active)setError(e.message)})
   },150)
   return()=>{active=false;clearTimeout(timer)}
- },[project.id,project.organization_id,search,sort,attention,filter,owner,offset,refresh,tableRevision])
+ },[project.id,project.organization_id,view,search,sort,attention,filter,owner,offset,refresh,tableRevision])
  const expand=p=><button type="button" className="workspace-button" aria-expanded={expanded===p.id} onClick={()=>setExpanded(expanded===p.id?null:p.id)}>Keywords for {p.title}</button>
  const group=p=><KeywordGroup key={p.id+':'+refresh} project={project} page={p} onOpen={onOpen} onUpdated={()=>updateTable(n=>n+1)}/>
  return <section aria-label="Website tables" className="min-w-0 space-y-3">
- <div className="flex gap-2">{['pages','keywords'].map(v=><button type="button" className="workspace-button" key={v} aria-pressed={view===v} onClick={()=>{setView(v);setExpanded(null)}}>{v==='pages'?'Pages':'Keywords'}</button>)}</div>
- <div className="flex flex-wrap gap-3">
+ <div className="flex gap-2">{['groups','pages','keywords'].map(v=><button type="button" className="workspace-button" key={v} aria-pressed={view===v} onClick={()=>{setView(v);setExpanded(null)}}>{v==='groups'?'URL groups':v==='pages'?'All pages':'Keywords'}</button>)}</div>
+ {view==='groups'&&<WebsiteUrlGroups workspace={workspace} refresh={refresh} onOpen={onOpen}/>}<div hidden={view==='groups'}><div className="flex flex-wrap gap-3">
  <label>Search pages or keywords <input value={search} maxLength={240} onChange={e=>change(setSearch,e.target.value)}/></label>
  <Filter label="Sort pages" value={sort} options={Object.entries({title:'Title A–Z',url:'URL A–Z',clicks:'Clicks, highest first',impressions:'Impressions, highest first',keywords:'Selected keywords'})} onChange={v=>change(setSort,v)}/>
  <Filter label="Evidence" value={attention} options={Object.entries({all:'All pages',unassigned:'No selected keywords',observed:'Observed queries',missing:'No observed queries'})} onChange={v=>change(setAttention,v)}/>
@@ -50,7 +52,7 @@ export default function WebsiteTables({workspace,refresh,onOpen}){
  {!data.total&&<p>No pages match these filters.</p>}
  <Pager offset={offset} total={data.total} onChange={setOffset} label="pages"/>
  </>}
- </section>
+ </div></section>
 }
 function KeywordGroup({project,page,onOpen,onUpdated}){
  const {user}=useAuth()

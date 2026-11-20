@@ -23,6 +23,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+      - run: deno test --frozen supabase/functions/_shared/observeTrackedPage.test.ts
+      - run: deno check --frozen supabase/functions/website-tracking/index.ts
       - run: deno test --frozen supabase/functions/project-search-console/provider.test.ts
       - run: deno check --frozen supabase/functions/project-search-console/index.ts
       - run: deno test --frozen supabase/functions/project-figma/frames.test.ts

@@ -1,7 +1,7 @@
 import {createFacebookPageReportingProtocol,FACEBOOK_PAGE_METRICS} from './reportingFacebookProtocol.js'
 import {reportingRefreshIdentity} from './reportingRefreshPolicy.js'
 import {ReportingProviderFailure} from './reportingRefreshWorker.js'
-export const FACEBOOK_REPORTING_CONTRACT=Object.freeze({sourceContract:'anka.meta.facebook-page.media-view.native-day.bounded.v26.v1',provider:'meta',resourceKind:'meta_facebook_page',metricDefinitions:FACEBOOK_PAGE_METRICS})
+export const FACEBOOK_REPORTING_CONTRACT=Object.freeze({sourceContract:'anka.meta.facebook-page.media-view.native-day.bounded.v26.v2',provider:'meta',resourceKind:'meta_facebook_page',metricDefinitions:FACEBOOK_PAGE_METRICS})
 const sha=async value=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value))))].map(x=>x.toString(16).padStart(2,'0')).join('')
 // Policy timezone defines only the explicit request window. Provider daily bucket
 // timezone remains unknown; end_time is retained verbatim and never relabelled a date.
