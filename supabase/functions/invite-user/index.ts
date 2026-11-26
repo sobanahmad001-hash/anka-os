@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { invitationRedirect } from '../_shared/invitationRedirect.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 
@@ -90,4 +91,4 @@ export function createTeamHandler(getContext: (req: Request) => Promise<TeamCont
     }
   }
 }
-if (import.meta.main) Deno.serve(createTeamHandler())
+if (import.meta.main) Deno.serve(rejectOAuthClients(createTeamHandler()))

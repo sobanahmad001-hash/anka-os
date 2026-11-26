@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
 import { createProjectImportHttpHandler } from '../_shared/projectSpreadsheetHttp.ts'
@@ -12,4 +13,4 @@ export const handleRequest=createProjectImportHttpHandler({releaseReady:IMPORT_R
     admin:createClient(url,namedKey('SUPABASE_SECRET_KEYS','SUPABASE_SERVICE_ROLE_KEY'),{auth:{persistSession:false}}),
   }
 }})
-if(import.meta.main)Deno.serve(handleRequest)
+if(import.meta.main)Deno.serve(rejectOAuthClients(handleRequest))

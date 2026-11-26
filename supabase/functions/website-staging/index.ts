@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {resolveServerOrganizationContext,type ServerOrganizationContext} from '../_shared/serverOrganizationContext.ts'
 import {STAGING_PROTOCOL,uuid,sha,createStagingTransport,stagingBundle,stagingCommand,verifyStagingReceipt} from '../_shared/websiteStaging.js'
 import {websiteNativeSnapshotChecksum} from '../_shared/websiteNativeDesign.js'
@@ -130,4 +131,4 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
   }catch{/* Revocation or receipt uncertainty never permits a replacement write. */}}
   return reply({error:e.message||'Staging could not be verified',request_retained:retained,rollback_verified:!retained&&!(['deploy','recover','deploy-chat','recover-chat'].includes(action))&&e.knownRollback===true},e.status||400)}
 }
-if(import.meta.main)Deno.serve(req=>handler(req))
+if(import.meta.main)Deno.serve(rejectOAuthClients(req=>handler(req)))

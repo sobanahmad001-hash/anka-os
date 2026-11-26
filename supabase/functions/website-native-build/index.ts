@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {resolveServerOrganizationContext,type ServerOrganizationContext} from '../_shared/serverOrganizationContext.ts'
 import {verifyWebsiteNativeManifest} from '../_shared/websiteNativeDraft.js'
 import {buildWebsiteBlockSource,WEBSITE_BLOCK_COMPILER} from '../_shared/websiteBlockBuild.js'
@@ -89,4 +90,4 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
  }
 }
 function scopeToRow(s:Json){return {organization_id:s.p_organization_id,project_id:s.p_project_id,engagement_id:s.p_engagement_id}}
-if(import.meta.main)Deno.serve(req=>handler(req))
+if(import.meta.main)Deno.serve(rejectOAuthClients(req=>handler(req)))

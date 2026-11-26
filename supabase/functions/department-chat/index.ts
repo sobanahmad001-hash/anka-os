@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {DESIGN_VIDEO_REFERENCE_ACTIONS,designVideoReferenceAction} from './designVideoReferences.ts'
 import { inspectDesignPdf } from '../_shared/designPdfInspection.mjs'
 import { PROJECT_DOCUMENT_ATTACHMENT_ACTIONS, projectDocumentAttachmentAction } from './projectDocumentAttachments.ts'
@@ -2417,4 +2418,4 @@ async function auditAttempt(admin: Client, organizationId: string, actorId: stri
   if (error) throw new Error('Department Chat audit could not be recorded')
 }
 
-if (import.meta.main) Deno.serve(request => handleRequest(request))
+if (import.meta.main) Deno.serve(rejectOAuthClients(request => handleRequest(request)))

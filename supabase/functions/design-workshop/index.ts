@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {readMediaSpending} from './mediaSpending.ts'
 import {privateAnimationSources} from './privateAnimationSources.ts'
 import {quoteMediaRequest,listMediaChoices} from './mediaRequests.ts'
@@ -2151,6 +2152,6 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   }
 }
 
-if (import.meta.main) Deno.serve(req => handler(req))
+if (import.meta.main) Deno.serve(rejectOAuthClients(req => handler(req)))
 
 export { handler }

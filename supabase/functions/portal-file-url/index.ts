@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.99.1'
 
@@ -12,6 +13,8 @@ const json = (body: Record<string, unknown>, status = 200) => new Response(JSON.
 })
 
 serve(async request => {
+ const oauthDenied = rejectOAuthClients(() => new Response(null))(request);
+ if (oauthDenied instanceof Response && oauthDenied.status === 403) return oauthDenied;
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 

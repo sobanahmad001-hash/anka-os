@@ -174,3 +174,8 @@ entrypoint = './functions/website-rankings/index.ts'
 enabled = true
 verify_jwt = true
 entrypoint = './functions/website-discovery/index.ts'
+
+[functions.hybrid-mcp]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/hybrid-mcp/index.ts"

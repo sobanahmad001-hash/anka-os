@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
 import { openAiTextOptions } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
@@ -484,4 +485,4 @@ export async function handler(req: Request, dependencies: HandlerDependencies = 
       Number.isFinite(status) ? status : 400)
   }
 }
-if (import.meta.main) Deno.serve(request => handler(request))
+if (import.meta.main) Deno.serve(rejectOAuthClients(request => handler(request)))

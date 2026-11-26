@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { googleAccessToken, namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 import { pinMarketingReportMetrics, validateMarketingReportMetricRefs } from './reportMetricPins.ts'
@@ -1402,4 +1403,4 @@ export async function handleRequest(
   }
 }
 
-if (import.meta.main) Deno.serve((request) => handleRequest(request))
+if (import.meta.main) Deno.serve(rejectOAuthClients((request) => handleRequest(request)))

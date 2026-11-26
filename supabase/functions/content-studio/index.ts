@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {pageKeywordIdentity,savePageKeywordStrategy,recoverPageKeywordStrategy} from '../_shared/pageKeywordStrategy.ts'
 import { CONTENT_ARTIFACT_TYPE_SET, createContentArtifactVersion } from '../_shared/contentArtifacts.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
@@ -782,4 +783,4 @@ export async function handleRequest(request: Request, dependencies: {resolveCont
   }
 }
 
-if (import.meta.main) Deno.serve(request=>handleRequest(request))
+if (import.meta.main) Deno.serve(rejectOAuthClients(request=>handleRequest(request)))

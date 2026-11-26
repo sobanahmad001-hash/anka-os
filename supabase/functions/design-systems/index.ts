@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { stableJson } from '../_shared/approvedArtifactContext.ts'
@@ -423,4 +424,4 @@ export async function handleRequest(request: Request, dependencies: HandlerDepen
       Number.isFinite(status) ? status : 400)
   }
 }
-if (import.meta.main) Deno.serve(request => handleRequest(request))
+if (import.meta.main) Deno.serve(rejectOAuthClients(request => handleRequest(request)))

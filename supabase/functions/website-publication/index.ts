@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {resolveServerOrganizationContext} from '../_shared/serverOrganizationContext.ts'
 import {uuid} from '../_shared/websiteStagingContracts.js'
 import {createPublicationInspection} from '../_shared/websitePublicationInspection.js'
@@ -168,4 +169,4 @@ export async function handler(req: Request, dependencies: {resolveContext?: type
     return reply({error: e instanceof SyntaxError ? 'Invalid bounded publication JSON' : e.message || 'Publication review unavailable', executable: false}, e.status || 400)
   }
 }
-if (import.meta.main) Deno.serve(req => handler(req))
+if (import.meta.main) Deno.serve(rejectOAuthClients(req => handler(req)))

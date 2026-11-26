@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { openAiTextOptions, requireAutomaticTextModel } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 
@@ -782,4 +783,4 @@ Current live records and the current user's explicit requirements take precedenc
   }
 }
 
-if (import.meta.main) Deno.serve(handleRequest)
+if (import.meta.main) Deno.serve(rejectOAuthClients(handleRequest))
