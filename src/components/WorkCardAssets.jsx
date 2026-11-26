@@ -38,6 +38,7 @@ function AssetPicker({project,cardKey,mode,setMode,busy,setBusy}){
  },[project.organization_id,project.id,cardKind,cardId,offset,search,revision])
  const [primary,setPrimary]=useState(null),[draft,setDraft]=useState({title:'',body:'',previous:null}),[view,setView]=useState(null)
  const requestId=useRef(null)
+ const [pendingSave,setPendingSave]=useState(false)
  const cardScope={...scope,p_card_kind:cardKind,p_card_id:cardId}
  useEffect(()=>{
   if(!cardKey)return
@@ -46,11 +47,23 @@ function AssetPicker({project,cardKey,mode,setMode,busy,setBusy}){
     .then(value=>{if(current)setPrimary(value)}).catch(e=>{if(current)setError(e.message)})
   return ()=>{current=false}
  },[project.organization_id,project.id,cardKind,cardId,revision])
- function changeDraft(change){requestId.current=null;setDraft({...draft,...change})}
+ function changeDraft(change){if(requestId.current)return;setDraft({...draft,...change})}
  async function saveDraft(){
   requestId.current??=crypto.randomUUID()
-  await checked(supabase.rpc('save_work_content',{...cardScope,p_request:requestId.current,p_title:draft.title,p_body:draft.body,p_previous:draft.previous}))
-  requestId.current=null;setDraft({title:'',body:'',previous:null});setView(null);setMode('attached');refresh(n=>n+1)
+  setPendingSave(true)
+  const receipt=await checked(supabase.rpc('save_hybrid_work_draft',{...cardScope,p_request:requestId.current,p_title:draft.title,p_body:draft.body,p_previous:draft.previous}))
+  if(receipt?.version_id!==requestId.current||receipt.card_id!==cardId||receipt.project_id!==project.id)throw Error('Save receipt mismatch. Retry the same save to recover its original version.')
+  const value=await checked(supabase.rpc('work_content_version',{...scope,p_id:receipt.version_id}))
+  if(value?.id!==receipt.version_id)throw Error('Saved draft could not be reopened. Retry the same save.')
+  requestId.current=null;setPendingSave(false);setDraft({title:'',body:'',previous:null});setView({...value,editable:true});setMode('attached');refresh(n=>n+1)
+ }
+ async function retrySaved(){
+  const id=view.id
+  const receipt=await checked(supabase.rpc('retry_work_content_save',{...cardScope,p_request:id}))
+  if(receipt?.version_id!==id||receipt.card_id!==cardId||receipt.project_id!==project.id)throw Error('Recovery receipt mismatch')
+  const value=await checked(supabase.rpc('work_content_version',{...scope,p_id:id}))
+  if(value?.id!==id)throw Error('Original version unavailable')
+  setView({...value,editable:true,recovered:true});refresh(n=>n+1)
  }
  async function act(fn){
   if(flight.current)return
@@ -99,11 +112,14 @@ function AssetPicker({project,cardKey,mode,setMode,busy,setBusy}){
  {cardKey&&<nav aria-label="Card asset actions" className="flex flex-wrap gap-1">{[['attached','Attached assets'],['choose','Choose project asset'],['upload','Upload file'],['link','Paste link']].map(([v,label])=><button className="workspace-button" type="button" key={v} aria-pressed={v===mode} onClick={()=>{setMode(v);setUsage(null)}}>{label}</button>)}</nav>}
  {cardKey&&<ProjectFigma project={project} cardKey={cardKey} onAttached={()=>{setMode('attached');refresh(n=>n+1)}}/>}
  {cardKey&&<ProjectDrive project={project} cardKey={cardKey} onAttached={()=>{setMode('attached');refresh(n=>n+1)}}/>}
- {mode==='write'&&<section><label>Title <input value={draft.title} maxLength={240} onChange={e=>changeDraft({title:e.target.value})}/></label>
- <label>Content <textarea className="block w-full" rows={7} maxLength={100000} value={draft.body} onChange={e=>changeDraft({body:e.target.value})}/></label>
- <button type="button" disabled={!draft.title.trim()||!draft.body.trim()} onClick={()=>act(saveDraft)}>Save draft version</button></section>}
+ {pendingSave&&<section role="status"><p>The original save request is retained. Retry without changing its text.</p><button type="button" onClick={()=>act(saveDraft)}>Retry same save</button></section>}
+ {mode==='write'&&<section><label>Title <input disabled={pendingSave} value={draft.title} maxLength={240} onChange={e=>changeDraft({title:e.target.value})}/></label>
+ <label>Content <textarea disabled={pendingSave} className="block w-full" rows={7} maxLength={100000} value={draft.body} onChange={e=>changeDraft({body:e.target.value})}/></label>
+ <button type="button" disabled={pendingSave||!draft.title.trim()||!draft.body.trim()} onClick={()=>act(saveDraft)}>Save draft version</button></section>}
  {view&&<section><h4>{view.title} · draft v{view.version}</h4><p className="whitespace-pre-wrap">{view.body}</p>
- {view.editable&&<button type="button" onClick={()=>{requestId.current=null;setDraft({title:view.title,body:view.body,previous:view.id});setMode('write');setView(null)}}>Edit as new version</button>}
+ <p>Exact version: {view.id}</p>
+ {view.recovered&&<p role="status">Original save recovered. Same version: {view.id}. No new version created.</p>}
+ {view.editable&&!pendingSave&&<><button type="button" onClick={()=>act(retrySaved)}>Retry original save</button><button type="button" onClick={()=>{requestId.current=null;setDraft({title:view.title,body:view.body,previous:view.id});setMode('write');setView(null)}}>Edit as new version</button></>}
  <button type="button" onClick={()=>setView(null)}>Close draft</button></section>}
  {error&&<p role="alert">{error}</p>}
  {mode==='attached'&&data&&<ul>{data.attached.length?data.attached.map(a=>row(a,false)):<li>No assets attached.</li>}</ul>}

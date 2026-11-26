@@ -20,6 +20,16 @@ begin
  perform public.save_hybrid_work_draft(org,project,'engagement_work_item',card,second_id,first_id,'Fixture brief','Revision two');
  replay:=public.save_hybrid_work_draft(org,project,'engagement_work_item',card,first_id,null,'Fixture brief','Supplied text');
  if replay is distinct from first_result then raise exception 'Newer version invalidated original recovery';end if;
+ replay:=public.retry_work_content_save(org,project,'engagement_work_item',card,first_id);
+ if replay is distinct from first_result then raise exception 'Saved request recovery changed original receipt';end if;
+ begin
+  perform public.retry_work_content_save(org,project,'engagement_work_item',card,gen_random_uuid());
+  raise exception 'Missing request recovery accepted';
+ exception when insufficient_privilege then null;end;
+ begin
+  perform public.retry_work_content_save(org,current_setting('fixture.other_project')::uuid,'engagement_work_item',card,first_id);
+  raise exception 'Cross-project recovery accepted';
+ exception when insufficient_privilege then null;end;
  begin
   perform public.save_hybrid_work_draft(org,project,'engagement_work_item',card,gen_random_uuid(),first_id,'Fixture brief','Stale overwrite');
   raise exception 'Stale overwrite accepted';
