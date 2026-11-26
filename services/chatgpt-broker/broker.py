@@ -160,5 +160,9 @@ def create_broker(settings: Settings, *, verifier=None, http_transport=None):
 
 
 if __name__ == '__main__':
+    # This pinned framework logger includes callback state in some error paths.
+    # Application audit lives in Anka; never emit OAuth callback diagnostics here.
+    from fastmcp.server.auth.oauth_proxy.proxy import logger as oauth_logger
+    oauth_logger.addFilter(lambda _record: False)
     server, _ = create_broker(Settings.from_env())
-    server.run(transport='http', host='0.0.0.0', port=8000, stateless_http=True, json_response=True, show_banner=False)
+    server.run(transport='http', host='0.0.0.0', port=8000, stateless_http=True, json_response=True, show_banner=False, uvicorn_config={'access_log': False})

@@ -25,8 +25,14 @@ try:
         raise AssertionError('Unauthenticated MCP allowed')
     except urllib.error.HTTPError as e:
         assert e.code==401
+    try:
+        urllib.request.urlopen('http://127.0.0.1:8000/auth/callback?code=smoke-private-code&state=smoke-private-state',timeout=2)
+    except urllib.error.HTTPError as e:
+        assert e.code>=400
     print(json.dumps({'launcher_uid':os.getuid(),'server_uid':10001,'actual_image_startup':'pass','oauth_metadata':'pass','unauthenticated_mcp':401,'memory_limit_mb':512,'cpu_limit':1,'production_changed':False}))
 finally:
     p.terminate();p.wait(timeout=10)
+    logs=p.stderr.read().decode()
+    assert 'smoke-private-code' not in logs and 'smoke-private-state' not in logs
 
 
