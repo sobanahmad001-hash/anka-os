@@ -9,6 +9,17 @@ permissions:
   contents: read
 
 jobs:
+  broker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: services/chatgpt-broker/requirements.txt
+      - run: pip install -r services/chatgpt-broker/requirements.txt
+      - run: python -m unittest discover -s services/chatgpt-broker -v
   validate:
     runs-on: ubuntu-latest
     steps:
