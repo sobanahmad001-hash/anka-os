@@ -20,6 +20,8 @@ jobs:
           cache-dependency-path: services/chatgpt-broker/requirements.txt
       - run: pip install -r services/chatgpt-broker/requirements.txt
       - run: python -m unittest discover -s services/chatgpt-broker -v
+      - run: docker build -t anka-broker-test services/chatgpt-broker
+      - run: docker run --rm --user 0 --network none --memory 512m --cpus 1 --tmpfs /data:rw,nosuid,nodev,size=16m -v "$PWD/services/chatgpt-broker/image_smoke.py:/smoke.py:ro" anka-broker-test python /smoke.py
   validate:
     runs-on: ubuntu-latest
     steps:

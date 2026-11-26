@@ -8,6 +8,8 @@ One non-root Python container, one replica, persistent encrypted `/data` volume,
 
 Hosting provider, region, hostname, volume, retention, resource limits and recurring cost remain unselected. Owner explicitly requires hosting review before activation. No hosted service or paid resource has been created. Review the concrete existing-account deployment option before provisioning.
 
+Railway mounts volumes as root. For that host only, `RAILWAY_RUN_UID=0` starts the narrow `start.py` initializer: it creates/owns only `/data/broker`, rejects symlinks and unexpected owners, sets mode0700, clears supplementary groups, and drops UID/GID to10001 before executing the broker. It never recursively changes ownership. Use a NEW dedicated volume; never mount the existing database volume. The HTTP process remains non-root. Other hosts can run the image's default UID10001 with a writable dedicated mount. See https://docs.railway.com/volumes.
+
 ## Configuration
 
 `BROKER_PUBLIC_URL`: exact HTTPS broker origin, with `/mcp` as its resource endpoint. `SUPABASE_URL`: existing Anka project origin. `SUPABASE_PUBLISHABLE_KEY`: public project API key, never a service key. `BROKER_UPSTREAM_AUDIENCE`: exact resource audience configured by the reviewed Supabase token hook. `BROKER_UPSTREAM_CLIENT_ID`: dedicated Supabase OAuth public client, with only the broker's exact `/auth/callback` URL registered; both OAuth legs use PKCE S256. Disable hosted Supabase dynamic registration: ChatGPT registers with the broker, not Supabase.

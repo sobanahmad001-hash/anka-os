@@ -161,4 +161,4 @@ def create_broker(settings: Settings, *, verifier=None, http_transport=None):
 
 if __name__ == '__main__':
     server, _ = create_broker(Settings.from_env())
-    server.run(transport='http', host='0.0.0.0', port=8000, stateless_http=True, json_response=True)
+    server.run(transport='http', host='0.0.0.0', port=8000, stateless_http=True, json_response=True, show_banner=False)
