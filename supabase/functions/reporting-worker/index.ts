@@ -1,4 +1,3 @@
-import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey, decryptSecret } from '../_shared/googleOAuthTokens.ts'
 import { createReportingWorkerHandler, reportingScheduleConfiguration } from '../_shared/reportingWorkerEndpoint.js'
@@ -43,4 +42,4 @@ const handler = createReportingWorkerHandler({
   },
   getAdminClient: async () => admin(),
 })
-if (import.meta.main) Deno.serve(rejectOAuthClients(handler))
+if (import.meta.main) Deno.serve(handler)

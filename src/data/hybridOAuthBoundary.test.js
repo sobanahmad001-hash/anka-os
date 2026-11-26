@@ -16,6 +16,15 @@ test('every ordinary Edge entrypoint installs the OAuth denial boundary',()=>{
       for(const rpc of ['request_website_observation','configure_website_observations','configure_website_tracking','begin_project_reporting_verification'])assert.ok(source.includes(`user.rpc('${rpc}'`))
       continue
     }
+    if(directory==='reporting-worker'){
+      assert.match(source,/ANKA_REPORTING_WORKER_SECRET/)
+      const endpoint=readFileSync(new URL('_shared/reportingWorkerEndpoint.js',root),'utf8')
+      assert.match(endpoint,/reportingMachineAuthenticated\(request,machineSecret\(\)\)/)
+      assert.match(endpoint,/await user\.rpc\(startName,startArgs\)/)
+      assert.match(endpoint,/if\(error\)return json/)
+      assert.ok(endpoint.indexOf('await user.rpc(startName,startArgs)')<endpoint.lastIndexOf('await getAdminClient()'))
+      continue
+    }
     if(/Deno\.serve\(|^serve\(/m.test(source))assert.match(source,/rejectOAuthClients/,directory)
   }
 })
