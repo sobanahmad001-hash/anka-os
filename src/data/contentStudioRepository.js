@@ -1,5 +1,4 @@
 import { supabase } from '../lib/supabase.js'
-import { createProjectGetContextAdapter } from '../../supabase/functions/_shared/projectGetContext.js'
 import { CONTENT_ARTIFACT_TYPES } from './contentStudio.js'
 import { BRAND_STATEMENT_SOURCE_TYPES, BRAND_STATEMENT_TYPE } from './brandBrief.js'
 import { recordedSourceVersionIds } from './contentLibrary.js'
@@ -113,7 +112,10 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       organizationSettings: organization?.settings || {} }
   },
 
-  getProjectContext: projectId => createProjectGetContextAdapter(supabase)({organization_id:organizationId,project_id:projectId},options),
+  async getProjectContext(projectId) {
+    const {createProjectGetContextAdapter}=await import('../../supabase/functions/_shared/projectGetContext.js')
+    return createProjectGetContextAdapter(supabase)({organization_id:organizationId,project_id:projectId},options)
+  },
   async loadLibrary(scope = {}) {
     let artifactQuery = supabase.from('artifacts')
       .select('id, organization_id, brand_id, engagement_id, engagement_stage_instance_id, artifact_type, title, created_by, created_at, engagements!artifacts_engagement_project_organization_fkey!inner(id, name, project_id, organization_id, projects!engagements_project_organization_fkey(id, name))')
