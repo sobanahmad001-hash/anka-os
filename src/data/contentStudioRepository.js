@@ -112,6 +112,10 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       organizationSettings: organization?.settings || {} }
   },
 
+  async getProjectContext(projectId) {
+    const {createProjectGetContextAdapter}=await import('../../supabase/functions/_shared/projectGetContext.js')
+    return createProjectGetContextAdapter(supabase)({organization_id:organizationId,project_id:projectId},options)
+  },
   async loadLibrary(scope = {}) {
     let artifactQuery = supabase.from('artifacts')
       .select('id, organization_id, brand_id, engagement_id, engagement_stage_instance_id, artifact_type, title, created_by, created_at, engagements!artifacts_engagement_project_organization_fkey!inner(id, name, project_id, organization_id, projects!engagements_project_organization_fkey(id, name))')
