@@ -9,6 +9,12 @@ permissions:
   contents: read
 
 jobs:
+  wordpress-drafts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tools/run-editable-wordpress.sh
   broker:
     runs-on: ubuntu-latest
     steps:

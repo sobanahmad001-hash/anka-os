@@ -79,6 +79,19 @@ class BrokerIsolation(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 create_broker(replace(self.settings, **change), verifier=self.verifier)
 
+    async def test_wordpress_tools_hidden_until_complete_scoped_configuration(self):
+        from fastmcp import Client
+        async with Client(self.server) as client:
+            self.assertNotIn('wordpress_save_draft', [tool.name for tool in await client.list_tools()])
+        with self.assertRaises(ValueError):
+            create_broker(replace(self.settings, wordpress_origin='https://staging.example.test'), verifier=self.verifier)
+        enabled, _ = create_broker(replace(self.settings, wordpress_origin='https://staging.example.test',
+            wordpress_site_id=str(uuid4()), wordpress_user='synthetic-only', wordpress_password='synthetic-only'), verifier=self.verifier)
+        async with Client(enabled) as client:
+            names = [tool.name for tool in await client.list_tools()]
+            self.assertIn('wordpress_read_draft', names)
+            self.assertIn('wordpress_save_draft', names)
+
 
 if __name__ == '__main__':
     unittest.main()
