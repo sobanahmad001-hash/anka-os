@@ -14,6 +14,25 @@ export default function VisualIdentityCard({kind,workspace,service,deliverable,a
   const workstream=streams.length===1?streams[0].id:stream
   const latest=deliverable?.versions.filter(version=>!version.withdrawn_at && figmaSourceUrl(version.preview_metadata?.preview_url))
     .sort((a,b)=>b.version_number-a.version_number)[0]
+  async function addDesignWorkstream() {
+    if (lock.current) return
+    lock.current = true
+    setBusy(true)
+    setError('')
+    try {
+      const result = await supabase.rpc('ensure_brand_design_workstream', {
+        p_project: project.id,
+        p_service: service.id,
+      })
+      if (result.error) throw result.error
+      await onRefresh()
+    } catch (reason) {
+      setError(reason.message)
+    } finally {
+      lock.current = false
+      setBusy(false)
+    }
+  }
   async function submit(event){
     event.preventDefault()
     if(lock.current)return
@@ -43,7 +62,11 @@ export default function VisualIdentityCard({kind,workspace,service,deliverable,a
       <label>Figma link<input type="url" required placeholder="Paste a Figma file or frame link" value={link} onChange={event=>setLink(event.target.value)}/></label>
     </>:streams.length!==1&&<label>Design workstream<select required value={stream} onChange={event=>setStream(event.target.value)}>
       <option value="">Choose workstream</option>{streams.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}</select></label>}
-    {!deliverable&&!streams.length&&<p>Add a Design workstream to this project to use this card.</p>}
+    {!deliverable&&!streams.length&&<div>
+      <p>Add a Design workstream to this project to use this card.</p>
+      {actorId && actorId === project.owner_id && service.status === 'active' &&
+        <button type="button" className="workspace-button" disabled={busy} onClick={addDesignWorkstream}>Add Design workstream</button>}
+    </div>}
     <button className="workspace-button" disabled={busy||(deliverable?!figmaSourceUrl(link):!workstream)}>{deliverable?'Save Figma link':'Add '+kind.label+' card'}</button>
     {error&&<p role="alert">{error}</p>}
   </form>
