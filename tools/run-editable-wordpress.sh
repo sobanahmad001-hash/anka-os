@@ -13,6 +13,12 @@ i=0
 until docker exec "$db" mariadb -h127.0.0.1 -uroot -psynthetic-local-only -e 'SELECT 1' wordpress >/dev/null 2>&1; do
  i=$((i+1)); [ "$i" -lt 30 ] || exit 1; sleep 1
 done
+# The WordPress entrypoint copies core and writes wp-config after container start.
+# Database readiness alone does not mean that WordPress has finished bootstrapping.
+i=0
+until docker exec "$wp" php -r 'define("WP_INSTALLING",true); require "/var/www/html/wp-load.php"; exit(defined("WP_CONTENT_DIR") ? 0 : 1);' >/dev/null 2>&1; do
+ i=$((i+1)); [ "$i" -lt 60 ] || exit 1; sleep 1
+done
 docker exec "$wp" php -l /candidate/wordpress/anka-drafts/anka-drafts.php
 result=$(docker exec "$wp" php /candidate/tools/test-editable-wordpress.php)
 printf '%s\n' "$result"
