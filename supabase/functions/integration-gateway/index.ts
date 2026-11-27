@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { OPENAI_ROUTINE_MODEL } from '../_shared/openaiModelPolicy.js'
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
@@ -721,4 +722,4 @@ export async function handleRequest(req: Request, dependencies: {
   }
 }
 
-if (import.meta.main) serve(req => handleRequest(req))
+if (import.meta.main) serve(rejectOAuthClients(req => handleRequest(req)))

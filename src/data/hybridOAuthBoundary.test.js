@@ -25,6 +25,6 @@ test('every ordinary Edge entrypoint installs the OAuth denial boundary',()=>{
       assert.ok(endpoint.indexOf('await user.rpc(startName,startArgs)')<endpoint.lastIndexOf('await getAdminClient()'))
       continue
     }
-    if(/Deno\.serve\(|^serve\(/m.test(source))assert.match(source,/rejectOAuthClients/,directory)
+    if(/\bserve\(/.test(source))assert.match(source,/rejectOAuthClients/,directory)
   }
 })
