@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const inputStyle = {
@@ -17,6 +17,7 @@ const inputStyle = {
 export default function Login() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,7 +31,8 @@ export default function Login() {
 
     try {
       await signIn(email, password);
-      navigate('/', { replace: true });
+      const target = new URLSearchParams(location.search).get('returnTo');
+      navigate(target?.startsWith('/oauth/consent?') ? target : '/', { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

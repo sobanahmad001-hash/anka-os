@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
 
@@ -46,4 +47,4 @@ export function createSchedulerHandler(getContext: (request: Request) => Promise
     } catch { return json({ error: 'Invalid scheduler request' }, 400) }
   }
 }
-if (import.meta.main) Deno.serve(createSchedulerHandler())
+if (import.meta.main) Deno.serve(rejectOAuthClients(createSchedulerHandler()))

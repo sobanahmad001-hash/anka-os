@@ -7,6 +7,7 @@ import Layout from './components/Layout'
 import { featureFlags } from './config/featureFlags'
 
 const Login = lazy(() => import('./pages/Login'))
+const HybridConsent = lazy(() => import('./pages/HybridConsent'))
 const AuthCallback = lazy(() => import('./pages/AuthCallback'))
 const AuthRecovery = lazy(() => import('./pages/AuthRecovery'))
 const Settings = lazy(() => import('./apps/Settings'))
@@ -58,6 +59,7 @@ export default function App() {
     <Suspense fallback={<RouteFallback />}>
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/oauth/consent" element={<HybridConsent />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/auth/recover" element={<AuthRecovery />} />
       

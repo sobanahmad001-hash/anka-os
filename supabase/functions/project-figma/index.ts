@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { FigmaReadError, readDesignFile } from './provider.ts'
 
@@ -10,6 +11,8 @@ const headers = {
 const reply = (data: unknown, status = 200) => Response.json(data, {status, headers})
 
 Deno.serve(async request => {
+ const oauthDenied = rejectOAuthClients(() => new Response(null))(request);
+ if (oauthDenied instanceof Response && oauthDenied.status === 403) return oauthDenied;
   if (request.method === 'OPTIONS') return new Response(null, {headers})
   if (request.method !== 'POST') return reply({error:'POST required'}, 405)
   const authorization = request.headers.get('Authorization')

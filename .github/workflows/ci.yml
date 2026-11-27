@@ -9,6 +9,19 @@ permissions:
   contents: read
 
 jobs:
+  broker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: services/chatgpt-broker/requirements.txt
+      - run: pip install -r services/chatgpt-broker/requirements.txt
+      - run: python -m unittest discover -s services/chatgpt-broker -v
+      - run: docker build -t anka-broker-test services/chatgpt-broker
+      - run: docker run --rm --user 0 --network none --memory 512m --cpus 1 --tmpfs /data:rw,nosuid,nodev,size=16m -v "$PWD/services/chatgpt-broker/image_smoke.py:/smoke.py:ro" anka-broker-test python /smoke.py
   validate:
     runs-on: ubuntu-latest
     steps:
@@ -23,6 +36,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+      - run: deno test --frozen supabase/functions/_shared/oauthBoundary.test.ts
+      - run: deno check --frozen supabase/functions/hybrid-mcp/index.ts
       - run: deno test --frozen supabase/functions/_shared/observeTrackedPage.test.ts
       - run: deno check --frozen supabase/functions/website-tracking/index.ts
       - run: deno test --frozen supabase/functions/project-search-console/provider.test.ts

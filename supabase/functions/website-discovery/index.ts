@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {scanChunk} from './scan.js'
 import {createClient} from 'npm:@supabase/supabase-js@2.112.4'
 import {siteOrigin,pinSite,readPinned} from './publicSite.ts'
@@ -49,4 +50,4 @@ export async function handle(req:Request,transport={pin:pinSite,read:readPinned}
   console.warn(JSON.stringify({event:'website_discovery_failed',stage}))
   return reply({error:'Discovery could not read this public HTTPS site. No pages were saved.'},422)}
 }
-if(import.meta.main)Deno.serve(req=>handle(req))
+if(import.meta.main)Deno.serve(rejectOAuthClients(req=>handle(req)))

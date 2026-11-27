@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { invitationRedirect } from '../_shared/invitationRedirect.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.99.1'
 
@@ -84,4 +85,4 @@ return async (request: Request) => {
   }
 }
 }
-if (import.meta.main) Deno.serve(createClientInvitationHandler())
+if (import.meta.main) Deno.serve(rejectOAuthClients(createClientInvitationHandler()))

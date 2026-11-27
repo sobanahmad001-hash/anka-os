@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import { projectDocumentMessageSources } from '../department-chat/projectDocumentAttachments.ts'
 import { privateDesignMessageSources } from '../department-chat/designPrivateAttachments.ts'
 import { prepareDesignBrief, designBriefAudit, settleDesignBrief, recoverAuditedDesignBrief } from '../_shared/designChatBriefIntegration.ts'
@@ -447,4 +448,4 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       ...(claimId ? { must_not_submit: true } : {}) }, status)
   }
 }
-if (import.meta.main) Deno.serve(request => handleRequest(request))
+if (import.meta.main) Deno.serve(rejectOAuthClients(request => handleRequest(request)))

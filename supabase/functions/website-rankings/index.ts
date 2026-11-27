@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {createClient} from 'npm:@supabase/supabase-js@2.112.4'
 
 const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization,apikey,x-client-info,content-type','Access-Control-Allow-Methods':'POST, OPTIONS'}
@@ -59,4 +60,4 @@ export async function handle(req:Request, env=(key:string)=>Deno.env.get(key), g
     return reply({state:'ready',rows})
   }catch{return reply({state:'unavailable',rows:[]},503)}
 }
-if(import.meta.main)Deno.serve(req=>handle(req))
+if(import.meta.main)Deno.serve(rejectOAuthClients(req=>handle(req)))

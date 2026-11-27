@@ -1,3 +1,4 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {resolveServerOrganizationContext,type ServerOrganizationContext} from '../_shared/serverOrganizationContext.ts'
 import {compileWebsiteNativeDesign,validateWebsiteNativeSite} from '../_shared/websiteNativeDesign.js'
 import {verifyWebsiteNativeManifest} from '../_shared/websiteNativeDraft.js'
@@ -57,4 +58,4 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
   return reply({data:result.data})
  }catch(error){const status=error&&typeof error==='object'&&'status'in error?Number(error.status):400;return reply({error:error instanceof Error?error.message:'Website draft unavailable',rollback_verified:!writeStarted||rollback,code},Number.isFinite(status)?status:400)}
 }
-if(import.meta.main)Deno.serve(req=>handler(req))
+if(import.meta.main)Deno.serve(rejectOAuthClients(req=>handler(req)))

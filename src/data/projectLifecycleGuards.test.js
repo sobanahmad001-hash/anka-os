@@ -7,7 +7,8 @@ import { transform } from 'esbuild'
 const edgeSource = readFileSync(new URL('../../supabase/functions/portal-file-url/index.ts', import.meta.url), 'utf8')
   .replace(/^import .*\n/gm, '')
   .replace('serve(async request => {', 'export default (async request => {')
-const edgeJS = await transform(`const { createClient, Deno } = globalThis.__lifecycleEdgeTest;\n${edgeSource}`, { loader: 'ts', format: 'esm' })
+const boundarySource = readFileSync(new URL('../../supabase/functions/_shared/oauthBoundary.ts', import.meta.url), 'utf8')
+const edgeJS = await transform(`const { createClient, Deno } = globalThis.__lifecycleEdgeTest;\n${boundarySource}\n${edgeSource}`, { loader: 'ts', format: 'esm' })
 let state
 const fakeClient = {
   auth: { getUser: async () => ({ data: { user: { id: 'actor' } } }) },

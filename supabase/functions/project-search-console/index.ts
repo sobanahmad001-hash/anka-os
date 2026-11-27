@@ -1,9 +1,12 @@
+import {rejectOAuthClients} from '../_shared/oauthBoundary.ts'
 import {createClient} from 'npm:@supabase/supabase-js@2.112.4'
 import {googleAccessToken} from '../_shared/googleOAuthTokens.ts'
 import {dateWindow,fetchBatch} from './provider.ts'
 const headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization,apikey,x-client-info,content-type','Cache-Control':'no-store'}
 const reply=(value:unknown,status=200)=>Response.json(value,{status,headers})
 Deno.serve(async req=>{
+ const oauthDenied = rejectOAuthClients(() => new Response(null))(req);
+ if (oauthDenied instanceof Response && oauthDenied.status === 403) return oauthDenied;
  if(req.method==='OPTIONS')return new Response(null,{headers})
  if(req.method!=='POST')return reply({error:'POST required'},405)
  const auth=req.headers.get('Authorization')
