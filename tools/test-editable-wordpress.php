@@ -44,5 +44,30 @@ $throw=static function() { throw new Exception('Injected after write failure'); 
 check(is_wp_error(call_draft($rollback)),'injected post-write failure fails');remove_action('wp_after_insert_post',$throw);
 check((int)$wpdb->get_var("SELECT count(*) FROM {$wpdb->posts} WHERE post_type='page'")===$count+1,'transaction rolls back page and binding');
 check(!is_wp_error(call_draft($rollback)),'same request succeeds after confirmed rollback');
+$legacy='<!-- wp:html -->' . "\n<style>.pilot{color:red}@media(max-width:720px){.pilot{color:blue}}</style>\n" . '<!-- /wp:html -->';
+$ornament='<!-- wp:html --><div class="orb"><i></i><b>anka</b></div><!-- /wp:html -->';
+wp_update_post(wp_slash(array('ID'=>3156,'post_content'=>$legacy.$blocks.$ornament)));
+$restricted=wp_create_user('restricted_draft_agent','synthetic-restricted-only','restricted@example.test');
+wp_set_current_user($restricted);wp_get_current_user()->add_cap('anka_edit_staging_drafts');kses_init();
+check(!current_user_can('unfiltered_html'),'fixture uses restricted draft role');
+$read=call_draft(array('scope'=>$scope),false);
+$preserve=$command;$preserve['request_id']='12121212-1212-4212-8212-121212121212';$preserve['expected_version']=$read['version'];
+$preserve['blocks']=$legacy.str_replace('Synthetic fixture','Edited native paragraph',$blocks).$ornament;
+$preserve['change_summary']='Edit native paragraph, preserve protected HTML and CSS';
+$before_count=count(wp_get_post_revisions(3156));
+$saved=call_draft($preserve);if (is_wp_error($saved)) { throw new Exception($saved->get_error_message()); }check(!is_wp_error($saved),'native edit alongside legacy HTML succeeds');
+check(get_post(3156)->post_content===$preserve['blocks'],'protected CSS and ornament bytes preserved');
+check(count(wp_get_post_revisions(3156))===$before_count+1,'native edit creates exactly one revision');
+check(call_draft($preserve)===$saved && count(wp_get_post_revisions(3156))===$before_count+1,'protected content retry adds no revision');
+foreach (array('alter'=>str_replace('color:red','color:green',$preserve['blocks']), 'remove'=>str_replace($ornament,'',$preserve['blocks']), 'add'=>$preserve['blocks'].$ornament, 'move'=>$ornament.$preserve['blocks'], 'script'=>str_replace('Edited native paragraph','<script>alert(1)</script>',$preserve['blocks'])) as $label=>$content) {
+ $denied=$preserve;$denied['request_id']='13131313-1313-4313-8313-131313131313';$denied['expected_version']=$saved['version'];$denied['blocks']=$content;
+ check(is_wp_error(call_draft($denied)),'protected content '.$label.' denied');
+ check(get_post(3156)->post_content===$preserve['blocks'] && count(wp_get_post_revisions(3156))===$before_count+1,'denied '.$label.' leaves page and revisions unchanged');
+}
+wp_set_current_user(1);kses_init();wp_update_post(wp_slash(array('ID'=>3156,'post_content'=>str_replace('color:red','color:purple',$preserve['blocks']))));
+wp_set_current_user($restricted);kses_init();
+check(call_draft($preserve)===$saved,'historical retry survives later human CSS change');
+$stale=$preserve;$stale['request_id']='14141414-1414-4414-8414-141414141414';check(is_wp_error(call_draft($stale)),'stale protected revision rejected');
 $GLOBALS['wp_rest_application_password_uuid']=null;check(is_wp_error(anka_draft_permission()),'cookie-only receiver access denied');
 echo json_encode(array('checks'=>$checks,'passed'=>true,'wordpress'=>get_bloginfo('version'),'php'=>PHP_VERSION,'production_writes'=>false))."\n";
+
