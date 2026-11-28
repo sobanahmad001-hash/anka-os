@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Anka Editable Staging Drafts (candidate)
  * Description: Explicitly scoped native-block drafts. No publication or theme changes.
- * Version: 0.1.0
+ * Version: 0.1.1
  */
 if (!defined('ABSPATH')) { exit; }
 
@@ -36,8 +36,28 @@ function anka_draft_install() {
  $wpdb->query("CREATE TABLE IF NOT EXISTS {$wpdb->prefix}anka_draft_receipts (request_id char(36) NOT NULL PRIMARY KEY, command_sha char(64) NOT NULL, receipt longtext NOT NULL) ENGINE=InnoDB");
 }
 register_activation_hook(__FILE__,'anka_draft_install');
-function anka_draft_blocks($blocks) {
+function anka_draft_protected_html($blocks) {
+ // Raw bytes, including delimiters, remain immutable. Parser paths also prevent
+ // moving protected markup into a different container or changing its order.
+ preg_match_all('/<!-- wp:html(?:\s+\{[^\r\n]*?\})?\s*-->.*?<!-- \/wp:html\s*-->/s',$blocks,$matches);
+ $paths=array();
+ $walk=function($nodes,$path) use (&$walk,&$paths) {
+  foreach ($nodes as $i=>$b) {
+   $here=$path.'/'.$i;
+   if ($b['blockName']==='core/html') { $paths[]=$here; }
+   $walk($b['innerBlocks'],$here);
+  }
+ };
+ $walk(parse_blocks($blocks),'');
+ if (count($paths)!==count($matches[0])) { throw new Exception('Malformed protected HTML'); }
+ return array('raw'=>$matches[0],'paths'=>$paths);
+}
+function anka_draft_blocks($blocks,$existing='') {
  if (!is_string($blocks) || strlen($blocks)>160000 || !has_blocks($blocks)) { throw new Exception('Native blocks required'); }
+ $protected=anka_draft_protected_html($blocks);
+ if ($protected!==anka_draft_protected_html($existing)) { throw new Exception('Existing HTML and CSS are immutable'); }
+ // Validate only editable native content; never broadly allow HTML or CSS.
+ foreach ($protected['raw'] as $raw) { $blocks=str_replace($raw,'',$blocks); }
  $allowed=array('core/group','core/columns','core/column','core/heading','core/paragraph','core/buttons','core/button','core/separator','core/spacer','core/list','core/list-item');
  $walk=function($nodes) use (&$walk,$allowed) {
   foreach ($nodes as $b) {
@@ -60,7 +80,7 @@ function anka_draft_snapshot($post,$scope) {
 }
 function anka_draft_handle($request,$save) {
  global $wpdb;
- $transaction=false;$lock=null;$post_id=0;
+ $transaction=false;$lock=null;$post_id=0;$protect_filter=null;$restore_filter=null;
  try {
   if (strlen($request->get_body())>200000) { throw new Exception('Request too large'); }
   $x=$request->get_json_params();$keys=is_array($x)?array_keys($x):array();sort($keys);
@@ -70,7 +90,7 @@ function anka_draft_handle($request,$save) {
   if ($save) {
    if (!anka_draft_uuid($x['request_id']) || !is_string($x['title']) || trim($x['title'])==='' || mb_strlen($x['title'])>240 || !is_string($x['change_summary']) || trim($x['change_summary'])==='' || mb_strlen($x['change_summary'])>1000) { throw new Exception('Bounded supplied title and change summary required'); }
    if ($x['expected_version']!==null && (!is_string($x['expected_version']) || !preg_match('/^[a-f0-9]{64}$/D',$x['expected_version']))) { throw new Exception('Current version required'); }
-   anka_draft_blocks($x['blocks']);$sha=anka_draft_hash($x);
+   $sha=anka_draft_hash($x);
   }
   $tables=array($wpdb->posts,$wpdb->postmeta,$wpdb->prefix.'anka_draft_bindings',$wpdb->prefix.'anka_draft_receipts');
   foreach ($tables as $table) {
@@ -107,8 +127,25 @@ function anka_draft_handle($request,$save) {
    if ($save && $x['expected_version']!==$before['version']) { throw new Exception('Concurrent edit: reopen current draft'); }
   } elseif (!$save || $x['expected_version']!==null) { throw new Exception('No bound draft; create requires null version'); }
   if (!$save) { $wpdb->query('COMMIT');$transaction=false;return $before; }
+  // Compare with the locked server revision, after recovery and stale checks.
+  anka_draft_blocks($x['blocks'],$post_id?$before['blocks']:'');
   $args=array('post_type'=>'page','post_status'=>'draft','post_title'=>$x['title'],'post_content'=>$x['blocks']);
   if ($post_id) { $args['ID']=$post_id; }
+  // Keep normal WordPress sanitization for all editable content. Restore only
+  // exact server-owned protected bytes, during this one write, after KSES.
+  $restore=array();
+  foreach (anka_draft_protected_html($x['blocks'])['raw'] as $i=>$raw) {
+   $marker='<!-- anka-preserved-'.bin2hex(random_bytes(16)).'-'.$i.' -->';
+   $restore[wp_slash($marker)]=wp_slash($raw);
+   $args['post_content']=str_replace($raw,$marker,$args['post_content']);
+  }
+  $restore_filter=static function($content) use ($restore) { return strtr($content,$restore); };
+  $original=wp_slash($x['blocks']);$masked=wp_slash($args['post_content']);
+  $protect_filter=static function($content) use ($original,$masked) { return $content===$original?$masked:$content; };
+  // Revision writes pass through the same filters; protect only this exact
+  // validated content, never arbitrary content from another write or hook.
+  add_filter('content_save_pre',$protect_filter,0);
+  add_filter('content_save_pre',$restore_filter,PHP_INT_MAX);
   $saved=wp_insert_post(wp_slash($args),true);
   if (is_wp_error($saved) || !$saved) { throw new Exception('Draft write failed'); }$post_id=(int)$saved;
   if (!$wpdb->get_var($wpdb->prepare("SELECT post_id FROM $binding WHERE card_key=%s",$card)) && $wpdb->insert($binding,array('card_key'=>$card,'post_id'=>$post_id))!==1) { throw new Exception('Binding conflict'); }
@@ -131,10 +168,15 @@ function anka_draft_handle($request,$save) {
   if ($transaction) { $wpdb->query('ROLLBACK'); }
   if ($post_id) { clean_post_cache($post_id); }
   return new WP_Error('anka_draft_failed',$e->getMessage(),array('status'=>409));
- } finally { if ($lock!==null) { $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)',$lock)); } }
+ } finally {
+  if ($protect_filter!==null) { remove_filter('content_save_pre',$protect_filter,0); }
+  if ($restore_filter!==null) { remove_filter('content_save_pre',$restore_filter,PHP_INT_MAX); }
+  if ($lock!==null) { $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)',$lock)); }
+ }
 }
 add_action('rest_api_init',static function() {
  foreach (array('read'=>false,'save'=>true) as $path=>$save) {
   register_rest_route('anka-drafts/v1','/'.$path,array('methods'=>'POST','permission_callback'=>'anka_draft_permission','callback'=>static function($r) use ($save) { return anka_draft_handle($r,$save); }));
  }
 });
+
